@@ -3,6 +3,7 @@ const { auth } = require('../middleware/auth');
 const { apiLimiter } = require('../middleware/rateLimiter');
 const { validate } = require('../middleware/validator');
 const feedbackService = require('../services/feedback.service');
+const exportService = require('../services/export.service');
 const router = express.Router();
 
 // All feedback routes require authentication
@@ -19,7 +20,7 @@ router.post('/analyze', validate('analyzeFeedback'), async (req, res, next) => {
   }
 });
 
-// Batch analyze
+// Batch analyze (up to 50)
 router.post('/batch', validate('batchAnalyze'), async (req, res, next) => {
   try {
     const results = await feedbackService.batchAnalyze(req.user._id, req.body.feedbacks);
@@ -29,6 +30,21 @@ router.post('/batch', validate('batchAnalyze'), async (req, res, next) => {
       summary: { total: results.length, succeeded, failed: results.length - succeeded },
       data: results
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Export feedbacks as CSV
+router.get('/export', async (req, res, next) => {
+  try {
+    const { sentiment, source, startDate, endDate } = req.query;
+    const { csv, count } = await exportService.exportCSV(req.user._id, { sentiment, source, startDate, endDate });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="feedback-export-${Date.now()}.csv"`);
+    res.setHeader('X-Record-Count', count);
+    res.send(csv);
   } catch (error) {
     next(error);
   }
@@ -47,15 +63,17 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// List feedbacks with pagination and filters
+// List feedbacks with pagination, filters, and date range
 router.get('/', async (req, res, next) => {
   try {
-    const { page, limit, sentiment, source } = req.query;
+    const { page, limit, sentiment, source, startDate, endDate } = req.query;
     const result = await feedbackService.list(req.user._id, {
       page: parseInt(page) || 1,
       limit: Math.min(parseInt(limit) || 20, 100),
       sentiment,
-      source
+      source,
+      startDate,
+      endDate
     });
     res.json({ success: true, ...result });
   } catch (error) {
